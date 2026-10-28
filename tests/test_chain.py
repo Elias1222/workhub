@@ -110,6 +110,23 @@ class ChainTest(unittest.TestCase):
         self.assertNotIn("outdir", made[0].get("params") or {})
         self.assertEqual((made[1].get("params") or {}).get("outdir"), "chain-test")
 
+    def test_handoff_step_stops_the_chain(self):
+        def handoff(job):
+            jobs.update_job(job, status="handed_off", note="复制到剪贴板并唤起应用",
+                            ended=jobs.now_ts(), elapsed=0.1)
+
+        def should_not_run(job):
+            raise AssertionError("人工接力之后不该继续")
+
+        jobs.JOB_RUNNERS["codex"] = handoff
+        jobs.JOB_RUNNERS["dsh"] = should_not_run
+        _, made = jobs.dispatch_chain(
+            [{"target": "codex", "prompt": "第一步"},
+             {"target": "dsh", "prompt": "第二步"}])
+
+        self.assertTrue(wait_for(lambda: jobs.get_job(made[1]["id"])["status"] == "skipped"))
+        self.assertIn("人工接力", jobs.get_job(made[1]["id"])["error"])
+
     def test_cancel_waiting_step(self):
         def runner(job):
             jobs.update_job(job, status="succeeded", output="ok",

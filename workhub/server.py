@@ -19,6 +19,7 @@ from . import __version__
 from .config import APP_NAME, CFG, DATA_DIR, HOME, LOG_DIR, OUT_ROOT, TEMPLATES
 from .jobs import (
     CHAIN_MAX_STEPS,
+    CHAIN_TARGETS,
     cancel_job,
     dispatch_chain,
     dispatch_job,
@@ -243,9 +244,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": False, "message": f"第 {idx} 步格式不对"}, 400)
                 target = (spec.get("target") or "").strip()
                 prompt = (spec.get("prompt") or "").strip()
-                if target not in TARGET_IDS:
+                if target not in CHAIN_TARGETS:
+                    hint = "（Kimi / WorkBuddy 是人工接力，没法把结果交给下一步）" \
+                        if target in TARGET_IDS else ""
                     return self._json(
-                        {"ok": False, "message": f"第 {idx} 步的目标不支持：{target or '（空）'}"}, 400)
+                        {"ok": False,
+                         "message": f"第 {idx} 步的目标不支持接力：{target or '（空）'}{hint}"}, 400)
                 if not prompt:
                     return self._json({"ok": False, "message": f"第 {idx} 步没写内容"}, 400)
                 clean.append({"target": target, "prompt": prompt,

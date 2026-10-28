@@ -15,6 +15,17 @@ def get(url, headers=None):
         return resp.status, resp.read()
 
 
+def post(url, body, headers=None):
+    hdrs = {"Content-Type": "application/json"}
+    hdrs.update(headers or {})
+    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=hdrs)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read() or b"{}")
+
+
 class TestServer(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -70,6 +81,48 @@ class TestServer(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             get(self.base + "/api/nope")
         self.assertEqual(ctx.exception.code, 404)
+
+
+class TestChainRoute(unittest.TestCase):
+    """/api/chain 的参数校验（真的派发要起子进程，这里只测拦得住的入参）。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._real_target_state = server.target_state
+        server.target_state = lambda tid: {
+            "id": tid, "name": tid, "headline": "stub", "kind": "test",
+            "running": True, "pids": [], "detail": "", "config": "", "cost": "",
+            "actions": [], "version": "0",
+        }
+        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        cls.port = cls.httpd.server_address[1]
+        cls.base = f"http://127.0.0.1:{cls.port}"
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        server.target_state = cls._real_target_state
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    def test_single_step_is_rejected(self):
+        code, body = post(self.base + "/api/chain", {"steps": [{"target": "codex", "prompt": "x"}]})
+        self.assertEqual(code, 400)
+        self.assertIn("2–", body["message"])
+
+    def test_handoff_target_is_rejected(self):
+        code, body = post(self.base + "/api/chain", {"steps": [
+            {"target": "workbuddy", "prompt": "写个方案"},
+            {"target": "codex", "prompt": "整理"}]})
+        self.assertEqual(code, 400)
+        self.assertIn("人工接力", body["message"])
+
+    def test_empty_prompt_is_rejected(self):
+        code, body = post(self.base + "/api/chain", {"steps": [
+            {"target": "codex", "prompt": " "},
+            {"target": "dsh", "prompt": "整理"}]})
+        self.assertEqual(code, 400)
+        self.assertIn("第 1 步", body["message"])
 
 
 class TestTokenGuard(unittest.TestCase):

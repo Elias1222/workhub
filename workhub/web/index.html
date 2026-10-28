@@ -313,7 +313,8 @@ let sel = new Set(['codex']);
 let expanded = new Set();
 let ovTarget = null;
 let busy = false;
-// 接力：默认两步（Codex → DSH），最多 5 步
+// 接力：默认两步（Codex → DSH），最多 5 步；只有能回收结果的目标能排进链
+const CHAIN_TARGETS = ['codex', 'dsh', 'muse', 'kimiweb'];
 let chainSteps = [{target:'codex', prompt:''}, {target:'dsh', prompt:''}];
 
 function toast(msg, bad=false){
@@ -393,7 +394,7 @@ function renderChain(){
   box.innerHTML = chainSteps.map((s, i) => `
     <div class="chainrow">
       <span class="cno">${i+1}</span>
-      <select data-csel="${i}">${TARGETS.map(t =>
+      <select data-csel="${i}">${CHAIN_TARGETS.map(t =>
         `<option value="${t}" ${t === s.target ? 'selected' : ''}>${LABEL[t]}</option>`).join('')}</select>
       <input data-cprompt="${i}" type="text" value="${esc(s.prompt)}"
         placeholder="${i === 0 ? '第一步做什么，例如：把 workspace 里的脚本整理成 README' : '下一步做什么，上一步的产物会自动带过来'}">

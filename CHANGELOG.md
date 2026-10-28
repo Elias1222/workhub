@@ -14,6 +14,8 @@
   自动拼进下一步的提示词（也支持 `{files}` / `{prev}` 占位）；上一步失败/取消/中断，
   后面的步骤自动标「已跳过」并说明断在哪一步。新增 `POST /api/chain`，任务卡显示「接力 2/3」。
 - 任务状态新增 `waiting`（等上一步）与 `skipped`（已跳过）；重启时等待中的步骤也标为中断。
+- 接力只接受能回收结果的目标（Codex / DSH / Muse / Kimi 网页）——Kimi 桌面端与 WorkBuddy 是人工接力，
+  提交时就拒绝；万一某个步骤仍以 `handed_off` 结束，链会停下并把余下步骤标「已跳过」。
 
 ### Fixed
 - 多个任务同时落盘时 `jobs.json` 会被并发写坏（`PermissionError: WinError 32`）：

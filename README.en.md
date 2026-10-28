@@ -69,6 +69,8 @@ Hit **接力…** and lay out a 2–5 step chain:
 - the next step's prompt automatically gets a `【接力上下文】` block with the previous step's product
   paths and the first 1200 characters of its answer;
 - use `{files}` (absolute product paths) or `{prev}` (previous answer) in a prompt to place them yourself;
+- only targets that **return a result** can join a chain (Codex / DSH / Muse / Kimi web); Kimi's desktop
+  app and WorkBuddy are manual hand-offs, and are rejected up front instead of failing mid-chain;
 - cards show a `接力 2/3` badge, waiting steps read *waiting*, skipped ones read *skipped*.
 
 ### Delivery directory

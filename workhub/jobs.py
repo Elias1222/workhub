@@ -33,7 +33,8 @@ MAX_JOBS = 120
 
 # 接力：一条链最多几步；这些状态表示一条任务已经有确定结局
 CHAIN_MAX_STEPS = 5
-TERMINAL_STATUSES = ("succeeded", "failed", "cancelled", "interrupted", "skipped")
+CHAIN_TARGETS = ("codex", "dsh", "muse", "kimiweb")
+TERMINAL_STATUSES = ("succeeded", "failed", "cancelled", "interrupted", "skipped", "handed_off")
 
 
 def load_jobs() -> None:
@@ -674,13 +675,12 @@ def _advance_chain(done: dict) -> None:
             continue
         why = {"failed": "失败", "cancelled": "被取消", "interrupted": "被中断",
                "skipped": "被跳过"}.get(status, status)
-        update_job(
-            child,
-            status="skipped",
-            ended=now_ts(),
-            elapsed=0,
-            error=f"上一步（{done.get('name')} 第 {done.get('step')} 步）{why}，这一步没有执行",
+        reason = (
+            "上一步是人工接力（Kimi / WorkBuddy），产物在应用里，链在这里停下"
+            if status == "handed_off"
+            else f"上一步（{done.get('name')} 第 {done.get('step')} 步）{why}，这一步没有执行"
         )
+        update_job(child, status="skipped", ended=now_ts(), elapsed=0, error=reason)
         _advance_chain(child)
 
 
