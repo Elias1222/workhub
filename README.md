@@ -47,6 +47,13 @@ cd workhub
 python -m workhub --open          # 打开 http://127.0.0.1:8770/
 ```
 
+不想 clone 也行，直接装 Release 上的 wheel：
+
+```bash
+pip install https://github.com/Elias1222/workhub/releases/download/v1.4.0/workhub-1.4.0-py3-none-any.whl
+workhub --open
+```
+
 装成命令也可以用：
 
 ```bash
@@ -54,8 +61,9 @@ python -m pip install -e .
 workhub --open
 ```
 
-> PyPI 上的 `workhub` 已经预留，发布流水线在 `.github/workflows/publish.yml`（Trusted Publishing）。
-> 首次发布前需要在 PyPI 认一次仓库，步骤见 [docs/publish.md](docs/publish.md#pypi还需要你在网页上点一次)。
+> 包已经在 [Releases](https://github.com/Elias1222/workhub/releases) 上，`pip install <wheel 链接>` 即可；
+> PyPI 上的 `workhub` 名字还没认领，等账号能过 2FA 再开（工作流已就绪，见
+> [docs/publish.md](docs/publish.md#现在怎么装不需要-pypi)）。
 
 Windows 想双击启动：`scripts\workhub.cmd`（前台带日志）或 `scripts\launch.vbs`（静默，无黑窗）。
 

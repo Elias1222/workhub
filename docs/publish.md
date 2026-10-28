@@ -34,11 +34,27 @@ python -m unittest discover -s tests -t .
 
 ## PyPI：还需要你在网页上点一次
 
-`publish.yml` 用的是 **Trusted Publishing**（OIDC，不需要把 token 存进 GitHub）。
-但要先在 PyPI 那边认一次这个仓库，否则发布会 403：
+## 现在怎么装（不需要 PyPI）
 
-1. 登录 <https://pypi.org> → **Your projects** → **Publishing** → **Add a pending publisher**
-   （直链：<https://pypi.org/manage/account/publishing/>）
+包已经挂在 GitHub Release 上，`pip` 直接能装：
+
+```bash
+pip install https://github.com/Elias1222/workhub/releases/download/v1.4.0/workhub-1.4.0-py3-none-any.whl
+workhub --open
+```
+
+（在干净的 venv 里验证过：`workhub --version` → `WorkHub 1.4.0`，`web/index.html` 在 wheel 里。）
+
+## PyPI：账号过不去 2FA 时先别管
+
+`publish.yml` 的 `Publish to PyPI` job 默认**不跑**——它挂在仓库变量 `PYPI_ENABLED` 上。
+所以现在打标签只会建包、挂 Release，不会因为 PyPI 没认领而变红。
+
+等 PyPI 能登录了，二选一：
+
+**A. Trusted Publishing（不用存密钥，推荐）**
+
+1. 登录 <https://pypi.org/manage/account/publishing/> → **Add a pending publisher**
 2. 填：
 
    | 字段 | 值 |
@@ -49,10 +65,19 @@ python -m unittest discover -s tests -t .
    | Workflow name | `publish.yml` |
    | Environment name | `pypi` |
 
-3. 保存。之后再打标签，`Publish to PyPI` 那个 job 就会把包传上去，`pip install workhub` 即可。
+3. 仓库 Settings → Variables → Actions → 新建 `PYPI_ENABLED` = `true`
+4. 打标签（或手动 Run workflow），包就上去了。
 
-> 名字已经查过，PyPI 上 `workhub` 目前没人占。
-> 如果你更想用 token：在仓库 Settings → Secrets 加 `PYPI_API_TOKEN`，把 `publish.yml` 里的
+**B. API token**
+
+1. <https://pypi.org/manage/account/token/> 建一个项目级 token
+2. 仓库 Settings → Secrets and variables → Actions → `PYPI_API_TOKEN` = 那个 token
+3. 同样把变量 `PYPI_ENABLED` 设成 `true`
+
+两条路工作流都支持（`publish.yml` 里按有没有 `PYPI_API_TOKEN` 自动选）。
+
+> PyPI 上 `workhub` 这个名字目前没人占；`pypi` environment 已经建好了。
+
 > `id-token: write` + `pypa/gh-action-pypi-publish` 换成
 > `with: password: ${{ secrets.PYPI_API_TOKEN }}`。
 

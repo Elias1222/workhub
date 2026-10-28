@@ -37,6 +37,9 @@ jobs:
   pypi:
     name: Publish to PyPI
     needs: build
+    # 仓库变量 PYPI_ENABLED=true 时才推 PyPI：PyPI 那边还没认领仓库的话，
+    # 打标签不会因此变红，包照样挂在 Release 上。（Settings → Variables 里开）
+    if: vars.PYPI_ENABLED == 'true'
     runs-on: ubuntu-latest
     # PyPI 的 trusted publisher 里填的环境名要和这里一致
     environment:
