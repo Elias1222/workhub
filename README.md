@@ -83,8 +83,11 @@ Windows 想双击启动：`scripts\workhub.cmd`（前台带日志）或 `scripts
   「【接力上下文 · 上一步是 Codex 第 1/2 步】」+ 产物绝对路径 + 上一步答复的前 1200 字；
 - 想自己控制措辞，就在提示词里用 `{files}`（换成产物绝对路径）或 `{prev}`（换成上一步的答复）；
 - 勾了 Codex / DSH 并填了 `out/` 子目录时，链上每一步都用同一个交付目录；
-- 能排进链的只有**能回收结果**的目标：Codex / DSH / Muse / Kimi 网页。Kimi 桌面端和 WorkBuddy
-  是人工接力（产物在应用里），提交时就会被拒绝，不会让你等到第 3 步才发现断链；
+- **人工节点也能进链**：Kimi 桌面端和 WorkBuddy 没有可调用的本地任务接口（详见
+  [设计取舍](docs/design.md#13-为什么不去逆向-workbuddy-的本地接口)），WorkHub 只能把提示词
+  复制到剪贴板并唤起应用。这一步结束后状态是「等人工交回」，链停在这里，后面的步骤保持
+  「等上一步」；你在应用里拿到结果，点任务卡上的 **交回结果**，把内容粘进来，这一步就算成功，
+  整条链接着往下走（不想要了就点「放弃这一步」，后面自动跳过）；
 - 任务卡上有「接力 2/3」徽章，等着的步骤显示「等上一步」，跳过的显示「已跳过」。
 
 每一步结束时会对比交付目录的前后快照，任务卡上写清**这一步自己动了什么**：
@@ -172,7 +175,8 @@ python -m workhub --version
 | POST | `/api/task` | `{prompt, targets, muse, codex, kimiweb, dsh}` 分发 |
 | POST | `/api/chain` | `{steps:[{target,prompt}], outdir, title}` 排一条 2–5 步的接力 |
 | POST | `/api/action` | `{target, action}` 启停/打开/启停桥 |
-| POST | `/api/job/<id>/cancel` | 取消 |
+| POST | `/api/job/<id>/cancel` | 取消（也用来放弃一个等人工交回的步骤） |
+| POST | `/api/job/<id>/handback` | `{output, note}` 人工接力的结果粘回来，链继续 |
 | POST | `/api/job/<id>/retry` | 原样重跑 |
 | GET | `/api/ping` | 名字、版本、PID、启动时间 |
 
@@ -243,6 +247,8 @@ powershell -ExecutionPolicy Bypass -File scripts\restart.ps1
 ## 路线图
 
 - [x] 任务串行编排：接力（2–5 步，产物与答复自动传递）
+- [x] 人工节点进链：交回结果后链继续（Kimi 桌面端 / WorkBuddy）
+- [ ] PyPI 发布（`pip install workhub`）
 - [ ] 任务队列与并发上限（现在每个请求直接起进程）
 - [ ] 产物目录打包下载、按日期归档
 - [ ] 更多目标：只要给 `cli` 一行命令，就能接进 `jobs.py`

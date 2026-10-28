@@ -6,7 +6,7 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-from workhub import server
+from workhub import jobs, server
 
 
 def get(url, headers=None):
@@ -110,12 +110,32 @@ class TestChainRoute(unittest.TestCase):
         self.assertEqual(code, 400)
         self.assertIn("2–", body["message"])
 
-    def test_handoff_target_is_rejected(self):
-        code, body = post(self.base + "/api/chain", {"steps": [
-            {"target": "workbuddy", "prompt": "写个方案"},
-            {"target": "codex", "prompt": "整理"}]})
+    def test_handback_requires_handed_off(self):
+        job = jobs.new_job("codex", "还在跑的任务")
+        code, body = post(f"{self.base}/api/job/{job['id']}/handback", {"output": "结果"})
         self.assertEqual(code, 400)
-        self.assertIn("人工接力", body["message"])
+        self.assertIn("人工交回", body["message"])
+
+    def test_handback_needs_output(self):
+        job = jobs.new_job("codex", "等人工的任务")
+        jobs.update_job(job, status="handed_off")
+        code, body = post(f"{self.base}/api/job/{job['id']}/handback", {"output": "  "})
+        self.assertEqual(code, 400)
+        self.assertIn("粘进来", body["message"])
+
+    def test_handback_unknown_job_404(self):
+        code, body = post(f"{self.base}/api/job/nope/handback", {"output": "结果"})
+        self.assertEqual(code, 404)
+        self.assertIn("不存在", body["message"])
+
+    def test_handback_marks_job_done(self):
+        job = jobs.new_job("workbuddy", "等人工的任务")
+        jobs.update_job(job, status="handed_off", started=jobs.now_ts())
+        code, body = post(f"{self.base}/api/job/{job['id']}/handback", {"output": "人工交回的内容"})
+        self.assertEqual(code, 200)
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["job"]["status"], "succeeded")
+        self.assertEqual(body["job"]["note"], "人工交回")
 
     def test_empty_prompt_is_rejected(self):
         code, body = post(self.base + "/api/chain", {"steps": [

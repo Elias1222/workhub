@@ -116,4 +116,27 @@ Windows 上直接 `PermissionError: [WinError 32] 另一个程序正在使用此
 代价是一次任务要对交付目录做两次 `rglob`——目录通常是几个到几十个文件，可以忽略；
 换来的是「这一步到底做了什么」不再需要人靠时间戳猜。
 
+## 13. 为什么不去逆向 WorkBuddy 的本地接口
+
+它确实在本机开了端口，但都不是「提交一个任务」的入口：
+
+| 端口 | 是什么 | 结果 |
+| --- | --- | --- |
+| `63631` | MCP 端点（`POST /mcp`，响应带 `X-Request-Id`） | `401 {"error":"unauthorized"}` |
+| `50284` | 一个空的 HTTP 服务 | 全 404 |
+| `18488` | 另一个小 API（`{"ok":false,"error":"Not Found"}`） | 只有 404 |
+
+`~/.workbuddy/wbipc/endpoint.json` 里有一个命名管道 + `ticket`，把它当 `Authorization: Bearer`
+或 `X-WorkBuddy-Ticket` 送到 `/mcp` 仍然是 401——那个 ticket 是给应用内部 IPC 用的，不是对外令牌。
+`mcp-tool-list.json` 里列的是 WorkBuddy **对外提供**的工具（云端数据库那套），反过来「把任务交给它的
+agent」并不在这个协议里。注册表里虽然有 `workbuddy://` 协议处理器，但深链参数没有公开文档。
+
+要接通就得逆向它的鉴权握手。这条路不稳定：每次客户端更新都可能失效，还要把一个未公开的令牌
+塞进第三方进程——对一个本地小工具来说，风险明显大于收益。
+
+所以选了另一条：**把「人」当成链上的一等公民**。Kimi / WorkBuddy 的步骤以 `handed_off` 停住
+（「等人工交回」），后面的步骤保持 `waiting`；人拿到结果后点「交回结果」粘回来，这一步变
+`succeeded` 并把那段文字传给下一步。既没假装自动化，也没让链断在半路。
+
+
 

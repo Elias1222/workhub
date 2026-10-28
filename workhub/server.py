@@ -24,6 +24,7 @@ from .jobs import (
     dispatch_chain,
     dispatch_job,
     get_job,
+    handback_job,
     job_log_path,
     job_public,
     list_jobs,
@@ -245,11 +246,9 @@ class Handler(BaseHTTPRequestHandler):
                 target = (spec.get("target") or "").strip()
                 prompt = (spec.get("prompt") or "").strip()
                 if target not in CHAIN_TARGETS:
-                    hint = "（Kimi / WorkBuddy 是人工接力，没法把结果交给下一步）" \
-                        if target in TARGET_IDS else ""
                     return self._json(
                         {"ok": False,
-                         "message": f"第 {idx} 步的目标不支持接力：{target or '（空）'}{hint}"}, 400)
+                         "message": f"第 {idx} 步的目标不支持接力：{target or '（空）'}"}, 400)
                 if not prompt:
                     return self._json({"ok": False, "message": f"第 {idx} 步没写内容"}, 400)
                 clean.append({"target": target, "prompt": prompt,
@@ -262,6 +261,18 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/job/([^/]+)/cancel", path)
         if m:
             return self._json({"ok": cancel_job(m.group(1))})
+        m = re.fullmatch(r"/api/job/([^/]+)/handback", path)
+        if m:
+            ok, message = handback_job(
+                m.group(1),
+                (payload.get("output") or "").strip(),
+                (payload.get("note") or "").strip() or None,
+            )
+            job = get_job(m.group(1))
+            status = 200 if ok else (404 if job is None else 400)
+            return self._json(
+                {"ok": ok, "message": message,
+                 "job": job_public(job) if job else None}, status)
         m = re.fullmatch(r"/api/job/([^/]+)/retry", path)
         if m:
             job = get_job(m.group(1))

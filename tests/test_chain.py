@@ -111,22 +111,66 @@ class ChainTest(unittest.TestCase):
         self.assertNotIn("outdir", made[0].get("params") or {})
         self.assertEqual((made[1].get("params") or {}).get("outdir"), "chain-test")
 
-    def test_handoff_step_stops_the_chain(self):
+    def test_handoff_step_waits_for_handback(self):
+        """人工节点：交回结果之前后面一步一直等；交回后带着这段文字继续。"""
+
         def handoff(job):
             jobs.update_job(job, status="handed_off", note="复制到剪贴板并唤起应用",
                             ended=jobs.now_ts(), elapsed=0.1)
 
-        def should_not_run(job):
-            raise AssertionError("人工接力之后不该继续")
+        seen = {}
+
+        def second(job):
+            seen["prompt"] = job["prompt"]
+            jobs.update_job(job, status="succeeded", output="第二步做完了",
+                            ended=jobs.now_ts(), elapsed=0.1)
 
         jobs.JOB_RUNNERS["codex"] = handoff
-        jobs.JOB_RUNNERS["dsh"] = should_not_run
+        jobs.JOB_RUNNERS["dsh"] = second
         _, made = jobs.dispatch_chain(
             [{"target": "codex", "prompt": "第一步"},
              {"target": "dsh", "prompt": "第二步"}])
 
+        self.assertTrue(wait_for(lambda: jobs.get_job(made[0]["id"])["status"] == "handed_off"))
+        time.sleep(0.3)
+        self.assertEqual(jobs.get_job(made[1]["id"])["status"], "waiting")
+
+        ok, message = jobs.handback_job(made[0]["id"], "WorkBuddy 里做出来的结果：三行提纲")
+        self.assertTrue(ok, message)
+        self.assertTrue(wait_for(lambda: jobs.get_job(made[1]["id"])["status"] == "succeeded"))
+        self.assertIn("三行提纲", seen["prompt"])
+        self.assertEqual(jobs.get_job(made[0]["id"])["status"], "succeeded")
+
+    def test_handback_rejects_empty_and_wrong_state(self):
+        ok, message = jobs.handback_job("nope", "有内容")
+        self.assertFalse(ok)
+        self.assertIn("不存在", message)
+
+        job = jobs.new_job("codex", "还没交付的任务")
+        ok, message = jobs.handback_job(job["id"], "有内容")
+        self.assertFalse(ok)
+        self.assertIn("人工交回", message)
+
+        jobs.update_job(job, status="handed_off")
+        ok, message = jobs.handback_job(job["id"], "   ")
+        self.assertFalse(ok)
+        self.assertIn("粘进来", message)
+
+    def test_cancel_handed_off_step_skips_the_rest(self):
+        def handoff(job):
+            jobs.update_job(job, status="handed_off", note="等人工",
+                            ended=jobs.now_ts(), elapsed=0.1)
+
+        jobs.JOB_RUNNERS["codex"] = handoff
+        jobs.JOB_RUNNERS["dsh"] = lambda job: None
+        _, made = jobs.dispatch_chain(
+            [{"target": "codex", "prompt": "第一步"},
+             {"target": "dsh", "prompt": "第二步"}])
+
+        self.assertTrue(wait_for(lambda: jobs.get_job(made[0]["id"])["status"] == "handed_off"))
+        self.assertTrue(jobs.cancel_job(made[0]["id"]))
         self.assertTrue(wait_for(lambda: jobs.get_job(made[1]["id"])["status"] == "skipped"))
-        self.assertIn("人工接力", jobs.get_job(made[1]["id"])["error"])
+        self.assertIn("放弃", jobs.get_job(made[1]["id"])["error"])
 
     def test_runner_changes_are_recorded_and_passed_on(self):
         """真写文件：这一步的「改动」要能查出来，并交给下一步。"""

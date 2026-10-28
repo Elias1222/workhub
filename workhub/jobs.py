@@ -33,8 +33,9 @@ MAX_JOBS = 120
 
 # 接力：一条链最多几步；这些状态表示一条任务已经有确定结局
 CHAIN_MAX_STEPS = 5
-CHAIN_TARGETS = ("codex", "dsh", "muse", "kimiweb")
-TERMINAL_STATUSES = ("succeeded", "failed", "cancelled", "interrupted", "skipped", "handed_off")
+# 能排进链的目标。Kimi / WorkBuddy 是「人工接力」：结果要人粘回来才算完成（见 handback_job）
+CHAIN_TARGETS = ("codex", "dsh", "muse", "kimiweb", "workbuddy", "kimi")
+TERMINAL_STATUSES = ("succeeded", "failed", "cancelled", "interrupted", "skipped")
 
 
 def load_jobs() -> None:
@@ -742,14 +743,15 @@ def _advance_chain(done: dict) -> None:
             update_job(child, prompt=chain_prompt(child, done), status="queued", started=now_ts())
             _start_job(child)
             continue
-        why = {"failed": "失败", "cancelled": "被取消", "interrupted": "被中断",
+        why = {"failed": "失败", "cancelled": "被取消或放弃", "interrupted": "被中断",
                "skipped": "被跳过"}.get(status, status)
-        reason = (
-            "上一步是人工接力（Kimi / WorkBuddy），产物在应用里，链在这里停下"
-            if status == "handed_off"
-            else f"上一步（{done.get('name')} 第 {done.get('step')} 步）{why}，这一步没有执行"
+        update_job(
+            child,
+            status="skipped",
+            ended=now_ts(),
+            elapsed=0,
+            error=f"上一步（{done.get('name')} 第 {done.get('step')} 步）{why}，这一步没有执行",
         )
-        update_job(child, status="skipped", ended=now_ts(), elapsed=0, error=reason)
         _advance_chain(child)
 
 
@@ -822,7 +824,7 @@ def dispatch_chain(steps: list[dict], outdir: str | None = None,
 
 def cancel_job(job_id: str) -> bool:
     job = get_job(job_id)
-    if not job or job.get("status") not in ("queued", "running", "waiting"):
+    if not job or job.get("status") not in ("queued", "running", "waiting", "handed_off"):
         return False
     job["_cancel"] = True
     proc = job.get("_proc")
@@ -831,8 +833,31 @@ def cancel_job(job_id: str) -> bool:
             proc.terminate()
         except Exception:
             pass
-    if job.get("status") in ("queued", "waiting"):
+    if job.get("status") in ("queued", "waiting", "handed_off"):
         update_job(job, status="cancelled", ended=now_ts())
         _advance_chain(job)
     return True
+
+
+def handback_job(job_id: str, output: str, note: str | None = None) -> tuple[bool, str]:
+    """人工接力的结果交回来：Kimi / WorkBuddy 里做的事，把结果粘进 WorkHub。"""
+    job = get_job(job_id)
+    if not job:
+        return False, "任务不存在"
+    if job.get("status") != "handed_off":
+        return False, "这个任务不是在等人工交回结果"
+    text = (output or "").strip()
+    if not text:
+        return False, "把结果粘进来再提交"
+    started = job.get("started") or now_ts()
+    update_job(
+        job,
+        output=text,
+        status="succeeded",
+        ended=now_ts(),
+        elapsed=round(max(0.0, now_ts() - started), 1),
+        note=note or "人工交回",
+    )
+    _advance_chain(job)
+    return True, "已交回，接力继续"
 

@@ -69,8 +69,11 @@ Hit **接力…** and lay out a 2–5 step chain:
 - the next step's prompt automatically gets a `【接力上下文】` block with the previous step's product
   paths and the first 1200 characters of its answer;
 - use `{files}` (absolute product paths) or `{prev}` (previous answer) in a prompt to place them yourself;
-- only targets that **return a result** can join a chain (Codex / DSH / Muse / Kimi web); Kimi's desktop
-  app and WorkBuddy are manual hand-offs, and are rejected up front instead of failing mid-chain;
+- **manual steps can join a chain too**: Kimi's desktop app and WorkBuddy expose no local task API
+  (see [design.md](docs/design.md#13-为什么不去逆向-workbuddy-的本地接口)), so WorkHub copies the prompt to the
+  clipboard and focuses the app. Such a step ends as *waiting for a hand-back* and the chain pauses there;
+  when you have the result, hit **交回结果**, paste it in, and the chain continues with that text
+  (hit *放弃这一步* to skip the rest);
 - cards show a `接力 2/3` badge, waiting steps read *waiting*, skipped ones read *skipped*.
 
 When a step finishes, the delivery directory is compared against the snapshot taken before it started,
@@ -137,6 +140,7 @@ python -m workhub --version
 | GET | `/artifact?path=` | serve a file under `out/` (403 outside) |
 | POST | `/api/task` | `{prompt, targets, muse, codex, kimiweb, dsh}` |
 | POST | `/api/chain` | `{steps:[{target,prompt}], outdir, title}` — a 2–5 step chain |
+| POST | `/api/job/<id>/handback` | `{output, note}` — paste a manual step's result, chain continues |
 | POST | `/api/action` | `{target, action}` start / stop / open / bridge |
 | POST | `/api/job/<id>/cancel` \| `/retry` | cancel or re-run a job |
 

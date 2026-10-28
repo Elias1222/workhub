@@ -298,6 +298,28 @@
 
 <div id="toast"></div>
 
+<div class="overlay" id="hbov">
+  <div class="modal" style="width:min(720px,100%)">
+    <div class="mhead">
+      <h3>交回结果</h3>
+      <span class="path" id="hbname"></span>
+      <span class="grow"></span>
+    </div>
+    <div class="mbody" style="padding:14px 16px">
+      <div class="jmuted" id="hbprompt" style="margin-bottom:8px;line-height:1.6"></div>
+      <textarea id="hbtext" rows="11" placeholder="把 Kimi / WorkBuddy 里做出来的结果粘到这里。接力链会用这段文字继续往下走。"
+        style="width:100%;box-sizing:border-box;background:#0b1119;border:1px solid #1c2837;border-radius:10px;color:#dce7f5;padding:11px 12px;font:13px/1.7 inherit;resize:vertical"></textarea>
+    </div>
+    <div class="mfoot" style="justify-content:space-between">
+      <button class="btn danger" id="hbdrop">放弃这一步</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost" id="hbclose">取消</button>
+        <button class="btn primary" id="hbsend">交回并继续</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const $ = (s, el=document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -307,7 +329,7 @@ const LABEL = {codex:'Codex', workbuddy:'WorkBuddy', kimi:'Kimi', muse:'Muse', k
 const STATUS = {
   running:['执行中','b-running'], queued:['排队中','b-queued'], succeeded:['已完成','b-succeeded'],
   failed:['失败','b-failed'], cancelled:['已取消','b-cancelled'], interrupted:['已中断','b-interrupted'],
-  handed_off:['已交付','b-handed_off'], waiting:['等上一步','b-waiting'], skipped:['已跳过','b-skipped']
+  handed_off:['等人工交回','b-handed_off'], waiting:['等上一步','b-waiting'], skipped:['已跳过','b-skipped']
 };
 const HINT = {codex:'写代码 / 跑命令', workbuddy:'办公文档 / 连接器', kimi:'PPT / 资料 / 浏览器',
               muse:'视频生成（按秒计费）', kimiweb:'打开网页 / 取正文 / 出 PDF',
@@ -320,8 +342,8 @@ let sel = new Set(['codex']);
 let expanded = new Set();
 let ovTarget = null;
 let busy = false;
-// 接力：默认两步（Codex → DSH），最多 5 步；只有能回收结果的目标能排进链
-const CHAIN_TARGETS = ['codex', 'dsh', 'muse', 'kimiweb'];
+// 接力：默认两步（Codex → DSH），最多 5 步；Kimi / WorkBuddy 是人工节点，结果要粘回来才继续
+const CHAIN_TARGETS = ['codex', 'dsh', 'muse', 'kimiweb', 'workbuddy', 'kimi'];
 let chainSteps = [{target:'codex', prompt:''}, {target:'dsh', prompt:''}];
 
 function toast(msg, bad=false){
@@ -484,6 +506,7 @@ function jobHtml(j){
       ${elapsed?`<span class="jmuted">· ${elapsed}</span>`:''}
       <span class="grow"></span>
       ${(j.status==='running'||j.status==='queued')?`<button class="btn ghost" data-cancel="${j.id}">取消</button>`:''}
+      ${j.status==='handed_off'?`<button class="btn primary" data-hb="${j.id}">交回结果</button>`:''}
       <button class="btn ghost" data-joblog="${j.id}">日志</button>
       ${(j.output||j.error)?`<button class="btn ghost" data-expand="${j.id}">${open?'收起':'展开结果'}</button>`:''}
       ${(j.status!=='running'&&j.status!=='queued')?`<button class="btn ghost" data-retry="${j.id}">再来一次</button>`:''}
@@ -579,9 +602,29 @@ async function refresh(){  try{
   }
 }
 
+let hbJob = null;
+
+function openHandback(id){
+  const j = (state.jobs || []).find(x => x.id === id);
+  if(!j) return;
+  hbJob = id;
+  $('#hbname').textContent = `第 ${j.step}/${j.steps_total} 步 · ${j.name}`;
+  $('#hbprompt').textContent = j.prompt || '';
+  $('#hbtext').value = '';
+  $('#hbov').classList.add('show');
+  setTimeout(()=>$('#hbtext').focus(), 30);
+}
+
+function closeHandback(){
+  hbJob = null;
+  $('#hbov').classList.remove('show');
+}
+
 document.addEventListener('click', async e => {
   const pb = e.target.closest('[data-probe]');
   if(pb){ probeKimi(); return; }
+  const hb = e.target.closest('[data-hb]');
+  if(hb){ openHandback(hb.dataset.hb); return; }
   const tpl = e.target.closest('[data-tpl]');
   if(tpl){ applyTemplate(tpl.dataset.tpl); return; }
   const b = e.target.closest('[data-act]');
@@ -692,6 +735,27 @@ $('#ovrefresh').onclick = loadLogs;
 $('#ovclose').onclick = () => $('#ov').classList.remove('show');
 $('#ov').onclick = e => { if(e.target === $('#ov')) $('#ov').classList.remove('show'); };
 document.addEventListener('keydown', e => { if(e.key === 'Escape') $('#ov').classList.remove('show'); });
+
+$('#hbclose').onclick = closeHandback;
+$('#hbov').onclick = e => { if(e.target === $('#hbov')) closeHandback(); };
+$('#hbsend').onclick = async () => {
+  if(!hbJob) return;
+  const output = $('#hbtext').value.trim();
+  if(!output){ toast('把结果粘进来再提交', true); $('#hbtext').focus(); return; }
+  const btn = $('#hbsend');
+  btn.disabled = true;
+  const r = await api(`/api/job/${encodeURIComponent(hbJob)}/handback`, {output});
+  btn.disabled = false;
+  toast(r.message || (r.ok ? '已交回' : '交回失败'), !r.ok);
+  if(r.ok){ closeHandback(); setTimeout(refresh, 200); }
+};
+$('#hbdrop').onclick = async () => {
+  if(!hbJob) return;
+  if(!confirm('放弃这一步？链上后面的步骤会一起跳过。')) return;
+  const r = await api(`/api/job/${encodeURIComponent(hbJob)}/cancel`, {});
+  toast(r.ok ? '已放弃这一步，后面的步骤跳过' : '放弃失败', !r.ok);
+  if(r.ok){ closeHandback(); setTimeout(refresh, 200); }
+};
 
 async function loadTemplates(){
   try{
