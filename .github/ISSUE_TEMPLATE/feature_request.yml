@@ -1,0 +1,32 @@
+name: 💡 想要的功能
+description: 新的目标、新的编排方式、新的产物类型
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        WorkHub 的边界是「本机、零第三方依赖、只听回环地址」——在这个边界内的想法都好谈。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你现在的麻烦
+      description: 别急着说方案，先说场景：哪一步现在得手动搬。
+      placeholder: 每天要先让 Codex 改代码、再让 DSH 写变更说明，现在得自己复制粘贴。
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你希望它怎么工作
+      placeholder: 接力能直接从上一个任务的产物里挑文件当附件。
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 现在你怎么绕过去
+    validations:
+      required: false

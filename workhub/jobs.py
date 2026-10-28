@@ -28,7 +28,12 @@ from .util import http_json, now_ts
 
 JOBS: list[dict] = []
 JOBS_LOCK = threading.Lock()
+SAVE_LOCK = threading.Lock()
 MAX_JOBS = 120
+
+# 接力：一条链最多几步；这些状态表示一条任务已经有确定结局
+CHAIN_MAX_STEPS = 5
+TERMINAL_STATUSES = ("succeeded", "failed", "cancelled", "interrupted", "skipped")
 
 
 def load_jobs() -> None:
@@ -41,7 +46,7 @@ def load_jobs() -> None:
             JOBS = []
     changed = False
     for job in JOBS:
-        if job.get("status") in ("running", "queued"):
+        if job.get("status") in ("running", "queued", "waiting"):
             job["status"] = "interrupted"
             job["error"] = "工作台重启，任务中断"
             changed = True
@@ -55,18 +60,34 @@ def save_jobs() -> None:
         for job in JOBS[:MAX_JOBS]:
             clean.append({k: v for k, v in job.items() if not k.startswith("_")})
         payload = {"jobs": clean}
-    tmp = JOBS_FILE.with_suffix(".tmp")
-    try:
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(JOBS_FILE)
-    except Exception:
-        traceback.print_exc()
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    # 多个任务线程可能同时落盘：各写各的临时文件，再加锁替换
+    with SAVE_LOCK:
+        tmp = JOBS_FILE.with_name(f"{JOBS_FILE.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            for attempt in range(4):
+                try:
+                    os.replace(tmp, JOBS_FILE)
+                    return
+                except PermissionError:
+                    if attempt == 3:
+                        raise
+                    time.sleep(0.05)
+        except Exception:
+            traceback.print_exc()
+        finally:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def job_public(job: dict) -> dict:
     out = {k: job.get(k) for k in (
         "id", "target", "name", "color", "prompt", "status", "error", "output", "file",
         "media_url", "started", "ended", "elapsed", "note", "params", "outdir", "files",
+        "chain_id", "chain_title", "step", "steps_total", "depends_on",
     )}
     if out.get("elapsed") is None and job.get("status") in ("running", "queued"):
         out["elapsed"] = round(now_ts() - (job.get("started") or now_ts()), 1)
@@ -609,11 +630,65 @@ JOB_RUNNERS = {
 }
 
 
-def dispatch_job(target: str, prompt: str, params: dict | None = None) -> dict:
-    job = new_job(target, prompt, params)
-    runner = JOB_RUNNERS.get(target)
+def _chain_context(done: dict) -> str:
+    """把上一步的产物与答复整理成交给下一步的上下文。"""
+    lines: list[str] = []
+    files = done.get("files") or []
+    if files:
+        lines.append("上一步产出的文件（本机绝对路径，可以直接读）：")
+        lines.extend(f"- {OUT_ROOT / rel}" for rel in files[:20])
+        if len(files) > 20:
+            lines.append(f"- ……共 {len(files)} 个文件")
+    else:
+        lines.append("上一步没有产出文件。")
+    text = (done.get("output") or "").strip()
+    if text:
+        lines += ["", "上一步的答复（节选）：", text[:1200] + ("…" if len(text) > 1200 else "")]
+    return "\n".join(lines)
+
+
+def chain_prompt(child: dict, done: dict) -> str:
+    """下一步的提示词：默认把上一步的产物附在前面，也支持 {files} / {prev} 占位。"""
+    base = child.get("ctx_prompt") or child.get("prompt") or ""
+    if "{files}" in base or "{prev}" in base:
+        joined = "\n".join(str(OUT_ROOT / rel) for rel in (done.get("files") or []))
+        return base.replace("{files}", joined or "（上一步没有产出文件）").replace(
+            "{prev}", (done.get("output") or "").strip()[:1200])
+    head = (f"【接力上下文 · 上一步是 {done.get('name')} 第 {done.get('step')}/"
+            f"{done.get('steps_total')} 步】")
+    return f"{head}\n{_chain_context(done)}\n\n【你的任务】\n{base}"
+
+
+def _advance_chain(done: dict) -> None:
+    """一个任务结束后，把等它的下一步放出去；上一步没成则整条链跳过。"""
+    status = done.get("status")
+    if status not in TERMINAL_STATUSES:
+        return
+    with JOBS_LOCK:
+        children = [j for j in JOBS
+                    if j.get("depends_on") == done.get("id") and j.get("status") == "waiting"]
+    for child in children:
+        if status == "succeeded":
+            update_job(child, prompt=chain_prompt(child, done), status="queued", started=now_ts())
+            _start_job(child)
+            continue
+        why = {"failed": "失败", "cancelled": "被取消", "interrupted": "被中断",
+               "skipped": "被跳过"}.get(status, status)
+        update_job(
+            child,
+            status="skipped",
+            ended=now_ts(),
+            elapsed=0,
+            error=f"上一步（{done.get('name')} 第 {done.get('step')} 步）{why}，这一步没有执行",
+        )
+        _advance_chain(child)
+
+
+def _start_job(job: dict) -> dict:
+    runner = JOB_RUNNERS.get(job["target"])
     if not runner:
-        update_job(job, status="failed", error=f"不支持的目标: {target}")
+        update_job(job, status="failed", error=f"不支持的目标: {job['target']}", ended=now_ts())
+        _advance_chain(job)
         return job
 
     def wrapped() -> None:
@@ -622,14 +697,54 @@ def dispatch_job(target: str, prompt: str, params: dict | None = None) -> dict:
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
             update_job(job, status="failed", error=f"{exc}", ended=now_ts())
+        finally:
+            try:
+                _advance_chain(job)
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
 
     threading.Thread(target=wrapped, daemon=True, name=f"job-{job['id']}").start()
     return job
 
 
+def dispatch_job(target: str, prompt: str, params: dict | None = None) -> dict:
+    return _start_job(new_job(target, prompt, params))
+
+
+def dispatch_chain(steps: list[dict], outdir: str | None = None,
+                   title: str | None = None) -> tuple[str, list[dict]]:
+    """按顺序建一串任务：上一步成功才放下一步，产物与答复自动带过去。"""
+    chain_id = "c" + uuid.uuid4().hex[:8]
+    total = len(steps)
+    made: list[dict] = []
+    prev: dict | None = None
+    for idx, spec in enumerate(steps, 1):
+        target = spec["target"]
+        prompt = spec["prompt"]
+        params = dict(spec.get("params") or {})
+        if outdir and target in ("codex", "dsh"):
+            params.setdefault("outdir", outdir)
+        job = new_job(target, prompt, params)
+        update_job(
+            job,
+            chain_id=chain_id,
+            chain_title=title or prompt[:40],
+            step=idx,
+            steps_total=total,
+            ctx_prompt=prompt,
+            depends_on=prev["id"] if prev else None,
+            status="queued" if idx == 1 else "waiting",
+        )
+        prev = job
+        made.append(job)
+    if made:
+        _start_job(made[0])
+    return chain_id, made
+
+
 def cancel_job(job_id: str) -> bool:
     job = get_job(job_id)
-    if not job or job.get("status") not in ("queued", "running"):
+    if not job or job.get("status") not in ("queued", "running", "waiting"):
         return False
     job["_cancel"] = True
     proc = job.get("_proc")
@@ -638,7 +753,8 @@ def cancel_job(job_id: str) -> bool:
             proc.terminate()
         except Exception:
             pass
-    if job.get("status") == "queued":
+    if job.get("status") in ("queued", "waiting"):
         update_job(job, status="cancelled", ended=now_ts())
+        _advance_chain(job)
     return True
 

@@ -65,6 +65,26 @@ Windows 想双击启动：`scripts\workhub.cmd`（前台带日志）或 `scripts
 
 失败的任务卡上点「再来一次」会原样重跑；「日志」看这次调用的原始输出。
 
+### 接力：让上一步的产物喂给下一步
+
+并行适合「同一件事问几个不同模型」，但「先查资料、再写文档」这种活儿只能排队做。
+点任务台右侧的 **接力…**，就能排一条 2–5 步的链：
+
+```
+第 1 步  Codex   把 out/chain-demo 里的原始笔记整理成 notes.md
+第 2 步  DSH     读上一步的 notes.md，写一份 8 页大纲到 outline.md
+```
+
+规矩很简单：
+
+- **上一步成功了才放下一步**；中途失败、取消、中断，后面的步骤自动标成「已跳过」，
+  错误里写明是哪一步断的，不会半路莫名其妙地空转；
+- **产物和答复会自动带过去**：下一步的提示词前面会多一段
+  「【接力上下文 · 上一步是 Codex 第 1/2 步】」+ 产物绝对路径 + 上一步答复的前 1200 字；
+- 想自己控制措辞，就在提示词里用 `{files}`（换成产物绝对路径）或 `{prev}`（换成上一步的答复）；
+- 勾了 Codex / DSH 并填了 `out/` 子目录时，链上每一步都用同一个交付目录；
+- 任务卡上有「接力 2/3」徽章，等着的步骤显示「等上一步」，跳过的显示「已跳过」。
+
 ### 几个细节
 
 - **交付目录**：勾了 Codex / DSH 并填了 `out/` 子目录时，子进程的**工作目录就是该目录**，
@@ -139,6 +159,7 @@ python -m workhub --version
 | GET | `/api/kimi/probe` | WebBridge 探测：守护进程、扩展、版本提示 |
 | GET | `/artifact?path=` | 取 `out/` 下的产物（越界 403） |
 | POST | `/api/task` | `{prompt, targets, muse, codex, kimiweb, dsh}` 分发 |
+| POST | `/api/chain` | `{steps:[{target,prompt}], outdir, title}` 排一条 2–5 步的接力 |
 | POST | `/api/action` | `{target, action}` 启停/打开/启停桥 |
 | POST | `/api/job/<id>/cancel` | 取消 |
 | POST | `/api/job/<id>/retry` | 原样重跑 |
@@ -148,6 +169,13 @@ python -m workhub --version
 curl -s -X POST http://127.0.0.1:8770/api/task \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"写一份 5 行的 README.md","targets":["codex"],"codex":{"outdir":"doc-1028"}}'
+
+# 接力：Codex 写完，DSH 接着改
+curl -s -X POST http://127.0.0.1:8770/api/chain \
+  -H 'Content-Type: application/json' \
+  -d '{"steps":[{"target":"codex","prompt":"写 notes.md"},
+               {"target":"dsh","prompt":"读 {files} 润色一遍"}],
+       "outdir":"chain-demo"}'
 ```
 
 ## 安全
@@ -203,6 +231,7 @@ powershell -ExecutionPolicy Bypass -File scripts\restart.ps1
 
 ## 路线图
 
+- [x] 任务串行编排：接力（2–5 步，产物与答复自动传递）
 - [ ] 任务队列与并发上限（现在每个请求直接起进程）
 - [ ] 产物目录打包下载、按日期归档
 - [ ] 更多目标：只要给 `cli` 一行命令，就能接进 `jobs.py`

@@ -17,9 +17,21 @@ from pathlib import Path
 
 from . import __version__
 from .config import APP_NAME, CFG, DATA_DIR, HOME, LOG_DIR, OUT_ROOT, TEMPLATES
-from .jobs import cancel_job, dispatch_job, get_job, job_log_path, job_public, list_jobs, load_jobs
+from .jobs import (
+    CHAIN_MAX_STEPS,
+    cancel_job,
+    dispatch_chain,
+    dispatch_job,
+    get_job,
+    job_log_path,
+    job_public,
+    list_jobs,
+    load_jobs,
+)
 from .targets import handle_action, kimi_web_status, target_state
 from .util import fmt_clock, tail
+
+TARGET_IDS = ("codex", "workbuddy", "kimi", "muse", "kimiweb", "dsh")
 
 APP_VERSION = __version__
 STATIC_DIR = Path(__file__).resolve().parent / "web"
@@ -209,8 +221,7 @@ class Handler(BaseHTTPRequestHandler):
             targets = payload.get("targets") or []
             if not prompt:
                 return self._json({"ok": False, "message": "提示词不能为空"}, 400)
-            targets = [t for t in targets
-                       if t in ("codex", "workbuddy", "kimi", "muse", "kimiweb", "dsh")]
+            targets = [t for t in targets if t in TARGET_IDS]
             if not targets:
                 return self._json({"ok": False, "message": "请至少选择一个工具"}, 400)
             muse_params = payload.get("muse") or {}
@@ -221,6 +232,29 @@ class Handler(BaseHTTPRequestHandler):
                          "dsh": dsh_params}
             jobs = [dispatch_job(t, prompt, params_of.get(t)) for t in targets]
             return self._json({"ok": True, "jobs": [job_public(j) for j in jobs]})
+        if path == "/api/chain":
+            steps = payload.get("steps") or []
+            if not isinstance(steps, list) or not (2 <= len(steps) <= CHAIN_MAX_STEPS):
+                return self._json(
+                    {"ok": False, "message": f"接力需要 2–{CHAIN_MAX_STEPS} 步"}, 400)
+            clean: list[dict] = []
+            for idx, spec in enumerate(steps, 1):
+                if not isinstance(spec, dict):
+                    return self._json({"ok": False, "message": f"第 {idx} 步格式不对"}, 400)
+                target = (spec.get("target") or "").strip()
+                prompt = (spec.get("prompt") or "").strip()
+                if target not in TARGET_IDS:
+                    return self._json(
+                        {"ok": False, "message": f"第 {idx} 步的目标不支持：{target or '（空）'}"}, 400)
+                if not prompt:
+                    return self._json({"ok": False, "message": f"第 {idx} 步没写内容"}, 400)
+                clean.append({"target": target, "prompt": prompt,
+                              "params": spec.get("params") or {}})
+            outdir = (payload.get("outdir") or "").strip() or None
+            title = (payload.get("title") or "").strip() or clean[0]["prompt"][:40]
+            chain_id, made = dispatch_chain(clean, outdir=outdir, title=title)
+            return self._json({"ok": True, "chain_id": chain_id,
+                               "jobs": [job_public(j) for j in made]})
         m = re.fullmatch(r"/api/job/([^/]+)/cancel", path)
         if m:
             return self._json({"ok": cancel_job(m.group(1))})

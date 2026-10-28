@@ -1,0 +1,67 @@
+name: 🐛 报告问题
+description: 某个卡片、某条任务或某个接口不对
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先看一眼 README 的「排错」一节：很多问题是**旧进程占着 8770** 造成的
+        （改了代码却看不到变化、Kimi 探测说没在跑），重启一次就好。
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 你期望的结果，和实际的差别。
+      placeholder: 点了「发送接力」，第二步一直停在「等上一步」……
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开 http://127.0.0.1:8770/
+        2. 写提示词，勾 Codex
+        3. 点「并行分发」
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: WorkHub 版本
+      description: 右上角看一下，或 `curl -s http://127.0.0.1:8770/api/ping`
+      placeholder: 1.2.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 系统
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - 其它 / 不确定
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python 版本
+      placeholder: "3.13.5"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: 任务卡上点「日志」，或前台跑 `python -m workhub --debug` 的输出。注意先删掉密钥。
+      render: shell
+    validations:
+      required: false

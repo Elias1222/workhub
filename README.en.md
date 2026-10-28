@@ -59,6 +59,18 @@ On Windows, `scripts\workhub.cmd` runs it in a console and `scripts\launch.vbs` 
 
 Finished jobs can be re-run with "again"; "log" shows the raw output of that invocation.
 
+### Chains (hand-off)
+
+Parallel is for "ask several models the same question". "Research first, then write" has to run in order.
+Hit **接力…** and lay out a 2–5 step chain:
+
+- a step only starts when the previous one **succeeded**; failure / cancel / interrupt marks the rest
+  as *skipped* with the reason, so nothing silently half-runs;
+- the next step's prompt automatically gets a `【接力上下文】` block with the previous step's product
+  paths and the first 1200 characters of its answer;
+- use `{files}` (absolute product paths) or `{prev}` (previous answer) in a prompt to place them yourself;
+- cards show a `接力 2/3` badge, waiting steps read *waiting*, skipped ones read *skipped*.
+
 ### Delivery directory
 
 When Codex or DSH gets an `out/` subdirectory, the child process **starts with that directory as its cwd**
@@ -112,6 +124,7 @@ python -m workhub --version
 | GET | `/api/kimi/probe` | WebBridge daemon / extension / version report |
 | GET | `/artifact?path=` | serve a file under `out/` (403 outside) |
 | POST | `/api/task` | `{prompt, targets, muse, codex, kimiweb, dsh}` |
+| POST | `/api/chain` | `{steps:[{target,prompt}], outdir, title}` — a 2–5 step chain |
 | POST | `/api/action` | `{target, action}` start / stop / open / bridge |
 | POST | `/api/job/<id>/cancel` \| `/retry` | cancel or re-run a job |
 

@@ -1,4 +1,4 @@
-# 开发用重启脚本（Windows）：杀掉旧的 WorkHub 进程再起一个新的。
+﻿# 开发用重启脚本（Windows）：杀掉旧的 WorkHub 进程再起一个新的。
 # 直接用 Start-Process 起新的而不杀旧的，端口会被旧进程占着 —— 新代码根本不生效，
 # 表现就是"改了没变化 / 探测还是错"。在仓库根目录执行：
 #   powershell -ExecutionPolicy Bypass -File scripts\restart.ps1

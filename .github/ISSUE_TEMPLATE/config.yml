@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/Elias1222/workhub/security/advisories/new
+    about: 别开公开 issue，走私密报告（见 SECURITY.md）
+  - name: 使用问题 / 聊聊
+    url: https://github.com/Elias1222/workhub/discussions
+    about: 装不上、配不对、想讨论设计
