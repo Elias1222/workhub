@@ -88,7 +88,7 @@ def job_public(job: dict) -> dict:
     out = {k: job.get(k) for k in (
         "id", "target", "name", "color", "prompt", "status", "error", "output", "file",
         "media_url", "started", "ended", "elapsed", "note", "params", "outdir", "files",
-        "chain_id", "chain_title", "step", "steps_total", "depends_on",
+        "touched", "chain_id", "chain_title", "step", "steps_total", "depends_on",
     )}
     if out.get("elapsed") is None and job.get("status") in ("running", "queued"):
         out["elapsed"] = round(now_ts() - (job.get("started") or now_ts()), 1)
@@ -145,8 +145,8 @@ def job_log_path(job: dict) -> Path:
     return LOG_DIR / f"{job['id']}.log"
 
 
-def resolve_outdir(name: str) -> Path | None:
-    """把用户给的目录名收敛成 OUT_ROOT 下的安全子目录。"""
+def _safe_outdir(name: str) -> Path | None:
+    """把目录名收敛成 OUT_ROOT 下的安全子目录（不创建）。"""
     raw = (name or "").strip().replace("\\", "/").strip("/")
     if not raw:
         return None
@@ -158,12 +158,60 @@ def resolve_outdir(name: str) -> Path | None:
         path.resolve().relative_to(OUT_ROOT.resolve())
     except Exception:
         return None
+    return path
+
+
+def resolve_outdir(name: str) -> Path | None:
+    """把用户给的目录名收敛成 OUT_ROOT 下的安全子目录，并建好。"""
+    path = _safe_outdir(name)
+    if path is None:
+        return None
     try:
         path.mkdir(parents=True, exist_ok=True)
     except Exception:
         traceback.print_exc()
         return None
     return path
+
+
+def snapshot_outdir(outdir: Path) -> dict[str, tuple[int, float]]:
+    """记下某个交付目录里所有文件的大小与修改时间，用来对比一次任务改了什么。"""
+    snap: dict[str, tuple[int, float]] = {}
+    try:
+        for path in outdir.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                st = path.stat()
+                rel = path.relative_to(OUT_ROOT).as_posix()
+            except (OSError, ValueError):
+                continue
+            snap[rel] = (st.st_size, st.st_mtime)
+    except OSError:
+        traceback.print_exc()
+    return snap
+
+
+def diff_snapshot(before: dict[str, tuple[int, float]],
+                  after: dict[str, tuple[int, float]]) -> list[dict]:
+    """两份快照的差异：added / changed（带字节增减）/ removed。"""
+    changes: list[dict] = []
+    for rel, (size, mtime) in sorted(after.items()):
+        old = before.get(rel)
+        if old is None:
+            changes.append({"path": rel, "change": "added", "size": size})
+        elif old[0] != size or old[1] != mtime:
+            changes.append({"path": rel, "change": "changed", "size": size, "delta": size - old[0]})
+    for rel in sorted(before):
+        if rel not in after:
+            changes.append({"path": rel, "change": "removed", "size": 0})
+    return changes
+
+
+def _job_outdir(job: dict) -> Path | None:
+    """任务用的交付目录（只算路径，不建目录、也不要求它已经存在）。"""
+    rel = job.get("outdir") or (job.get("params") or {}).get("outdir")
+    return _safe_outdir(rel) if rel else None
 
 
 def run_codex_job(job: dict) -> None:
@@ -631,11 +679,30 @@ JOB_RUNNERS = {
 }
 
 
+def _touched_lines(done: dict) -> list[str]:
+    """这次任务自己动了哪些文件（新增/修改/删除），比「目录里都有什么」更精确。"""
+    touched = done.get("touched") or []
+    if not touched:
+        return []
+    added = [c["path"] for c in touched if c.get("change") == "added"]
+    changed = [c["path"] for c in touched if c.get("change") == "changed"]
+    removed = [c["path"] for c in touched if c.get("change") == "removed"]
+    lines = ["这一步实际改动（新写入或改过的文件才是它的产物）："]
+    for rel in (added + changed)[:20]:
+        lines.append(f"- {OUT_ROOT / rel}")
+    if removed:
+        lines.append("- 删除了：" + "、".join(removed[:10]))
+    return lines
+
+
 def _chain_context(done: dict) -> str:
     """把上一步的产物与答复整理成交给下一步的上下文。"""
     lines: list[str] = []
+    own = _touched_lines(done)
     files = done.get("files") or []
-    if files:
+    if own:
+        lines.extend(own)
+    elif files:
         lines.append("上一步产出的文件（本机绝对路径，可以直接读）：")
         lines.extend(f"- {OUT_ROOT / rel}" for rel in files[:20])
         if len(files) > 20:
@@ -652,7 +719,9 @@ def chain_prompt(child: dict, done: dict) -> str:
     """下一步的提示词：默认把上一步的产物附在前面，也支持 {files} / {prev} 占位。"""
     base = child.get("ctx_prompt") or child.get("prompt") or ""
     if "{files}" in base or "{prev}" in base:
-        joined = "\n".join(str(OUT_ROOT / rel) for rel in (done.get("files") or []))
+        own = [c["path"] for c in (done.get("touched") or []) if c.get("change") != "removed"]
+        paths = own or (done.get("files") or [])
+        joined = "\n".join(str(OUT_ROOT / rel) for rel in paths)
         return base.replace("{files}", joined or "（上一步没有产出文件）").replace(
             "{prev}", (done.get("output") or "").strip()[:1200])
     head = (f"【接力上下文 · 上一步是 {done.get('name')} 第 {done.get('step')}/"
@@ -692,12 +761,21 @@ def _start_job(job: dict) -> dict:
         return job
 
     def wrapped() -> None:
+        run_dir = _job_outdir(job)
+        before = snapshot_outdir(run_dir) if run_dir is not None else None
         try:
             runner(job)
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
             update_job(job, status="failed", error=f"{exc}", ended=now_ts())
         finally:
+            if before is not None:
+                try:
+                    after_dir = _job_outdir(job) or run_dir
+                    after = snapshot_outdir(after_dir) if after_dir is not None else {}
+                    update_job(job, touched=diff_snapshot(before, after))
+                except Exception:  # noqa: BLE001
+                    traceback.print_exc()
             try:
                 _advance_chain(job)
             except Exception:  # noqa: BLE001

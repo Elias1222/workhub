@@ -73,6 +73,16 @@ Hit **接力…** and lay out a 2–5 step chain:
   app and WorkBuddy are manual hand-offs, and are rejected up front instead of failing mid-chain;
 - cards show a `接力 2/3` badge, waiting steps read *waiting*, skipped ones read *skipped*.
 
+When a step finishes, the delivery directory is compared against the snapshot taken before it started,
+so the card says what **this step** actually did:
+
+```
+new notes.md 219B        changed notes.md +161B        new summary.md 195B        deleted draft.md
+```
+
+Those — not the whole directory — are what travels to the next step: leftovers from earlier steps in the
+same folder are not mistaken for this step's product, and `{files}` expands to exactly these paths.
+
 ### Delivery directory
 
 When Codex or DSH gets an `out/` subdirectory, the child process **starts with that directory as its cwd**

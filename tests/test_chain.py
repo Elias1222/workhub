@@ -1,4 +1,5 @@
 """接力：上一步的产物交给下一步，失败就整条跳过。"""
+import shutil
 import threading
 import time
 import unittest
@@ -126,6 +127,67 @@ class ChainTest(unittest.TestCase):
 
         self.assertTrue(wait_for(lambda: jobs.get_job(made[1]["id"])["status"] == "skipped"))
         self.assertIn("人工接力", jobs.get_job(made[1]["id"])["error"])
+
+    def test_runner_changes_are_recorded_and_passed_on(self):
+        """真写文件：这一步的「改动」要能查出来，并交给下一步。"""
+        dir_path = OUT_ROOT / "chain-touch"
+        self.addCleanup(shutil.rmtree, dir_path, True)
+
+        def writer(job):
+            dir_path.mkdir(parents=True, exist_ok=True)
+            (dir_path / "a.md").write_text("草稿\n", encoding="utf-8")
+            jobs.update_job(job, status="succeeded", output="写了 a.md",
+                            files=["chain-touch/a.md"], ended=jobs.now_ts(), elapsed=0.1)
+
+        def rewriter(job):
+            (dir_path / "a.md").write_text("草稿\n第二行\n", encoding="utf-8")
+            (dir_path / "b.md").write_text("补充\n", encoding="utf-8")
+            jobs.update_job(job, status="succeeded", output="改了 a.md，加了 b.md",
+                            ended=jobs.now_ts(), elapsed=0.1)
+
+        jobs.JOB_RUNNERS["codex"] = writer
+        jobs.JOB_RUNNERS["dsh"] = rewriter
+        _, made = jobs.dispatch_chain(
+            [{"target": "codex", "prompt": "写草稿"},
+             {"target": "dsh", "prompt": "接着改"}], outdir="chain-touch")
+
+        self.assertTrue(wait_for(lambda: jobs.get_job(made[0]["id"])["status"] == "succeeded"))
+        self.assertTrue(wait_for(lambda: jobs.get_job(made[1]["id"])["status"] == "succeeded"))
+
+        first = jobs.get_job(made[0]["id"])
+        self.assertTrue(wait_for(lambda: bool(jobs.get_job(made[0]["id"]).get("touched"))))
+        first = jobs.get_job(made[0]["id"])
+        self.assertEqual([c["path"] for c in first["touched"]], ["chain-touch/a.md"])
+        self.assertEqual(first["touched"][0]["change"], "added")
+
+        second = jobs.get_job(made[1]["id"])
+        self.assertTrue(wait_for(lambda: bool(jobs.get_job(made[1]["id"]).get("touched"))))
+        second = jobs.get_job(made[1]["id"])
+        changes = {c["path"]: c["change"] for c in second["touched"]}
+        self.assertEqual(changes.get("chain-touch/a.md"), "changed")
+        self.assertEqual(changes.get("chain-touch/b.md"), "added")
+        # 第二步的提示词里带的是「这一步实际改动」，而不是整个目录
+        self.assertIn("这一步实际改动", second["prompt"])
+        self.assertIn(str(OUT_ROOT / "chain-touch/a.md"), second["prompt"])
+
+    def test_snapshot_diff_detects_add_change_remove(self):
+        path = OUT_ROOT / "snap-demo"
+        self.addCleanup(shutil.rmtree, path, True)
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "keep.txt").write_text("v1", encoding="utf-8")
+        (path / "gone.txt").write_text("bye", encoding="utf-8")
+        before = jobs.snapshot_outdir(path)
+
+        (path / "keep.txt").write_text("v1 plus more", encoding="utf-8")
+        (path / "new.txt").write_text("hi", encoding="utf-8")
+        (path / "gone.txt").unlink()
+        after = jobs.snapshot_outdir(path)
+
+        changes = {c["path"]: c for c in jobs.diff_snapshot(before, after)}
+        self.assertEqual(changes["snap-demo/new.txt"]["change"], "added")
+        self.assertEqual(changes["snap-demo/keep.txt"]["change"], "changed")
+        self.assertEqual(changes["snap-demo/keep.txt"]["delta"], 10)
+        self.assertEqual(changes["snap-demo/gone.txt"]["change"], "removed")
 
     def test_cancel_waiting_step(self):
         def runner(job):
