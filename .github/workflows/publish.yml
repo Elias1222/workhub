@@ -1,0 +1,71 @@
+name: Publish
+
+# 打 tag 时发布到 PyPI（Trusted Publishing，不需要存 token），
+# 并把 sdist/wheel 挂到对应的 GitHub Release 上。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build sdist and wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+          python -m twine check dist/*
+      - name: Smoke-test the wheel
+        run: |
+          python -m pip install dist/*.whl
+          workhub --version
+          python -c "import workhub, pathlib; p = pathlib.Path(workhub.__file__).parent / 'web' / 'index.html'; assert p.is_file(), p"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # PyPI 的 trusted publisher 里填的环境名要和这里一致
+    environment:
+      name: pypi
+      url: https://pypi.org/p/workhub
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  release-assets:
+    name: Attach files to the GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" dist/* --clobber

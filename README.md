@@ -54,6 +54,9 @@ python -m pip install -e .
 workhub --open
 ```
 
+> PyPI 上的 `workhub` 已经预留，发布流水线在 `.github/workflows/publish.yml`（Trusted Publishing）。
+> 首次发布前需要在 PyPI 认一次仓库，步骤见 [docs/publish.md](docs/publish.md#pypi还需要你在网页上点一次)。
+
 Windows 想双击启动：`scripts\workhub.cmd`（前台带日志）或 `scripts\launch.vbs`（静默，无黑窗）。
 
 ## 用法
