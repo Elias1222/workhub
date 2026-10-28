@@ -49,11 +49,22 @@ jobs:
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      # 两条路：仓库里配了 PYPI_API_TOKEN 就用 token（最省事），
+      # 没配就走 Trusted Publishing（PyPI 上认过 pending publisher 即可，不需要任何密钥）。
+      - name: Publish with API token
+        if: ${{ secrets.PYPI_API_TOKEN != '' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Publish with Trusted Publishing
+        if: ${{ secrets.PYPI_API_TOKEN == '' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
 
   release-assets:
     name: Attach files to the GitHub Release
     needs: build
+    # 只有真的推了标签才挂 Release；手动 dispatch 时跳过
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
