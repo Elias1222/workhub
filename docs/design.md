@@ -1,0 +1,80 @@
+# 设计取舍
+
+这份文档记录几个「为什么这样做」的决定，以及被实测否掉的替代方案。改代码前值得先读一遍。
+
+## 1. 为什么是本机网页，而不是托盘应用 / TUI
+
+- 五个工具里三个是 Electron 桌面应用，托盘图标的意义是「开关它们」，而不是「看它们在干什么」。
+- 任务卡要展示两类富内容：Markdown 输出和 mp4/png 预览。终端里做这件事的代价远高于一个 `<video>` 标签。
+- 网页还有个副作用好处：**任务流天然可分享**——截个图就能说明发生了什么。
+
+代价是需要保持一个进程活着。用 `pythonw`/后台方式启动，关掉浏览器不影响后台任务。
+
+## 2. 为什么用 `http.server` 而不是 FastAPI/Flask
+
+- 目标用户是「本机上装了五个 AI 工具的人」，让他们为看状态装一套 Web 框架不合适。
+- 零依赖意味着 `git clone` 之后 `python -m workhub` 就能跑，CI 也不需要装任何东西。
+- 并发模型够用：`ThreadingHTTPServer`，每个请求一个线程，任务是线程 + 子进程，没有共享状态热点。
+
+如果将来要做 WebSocket 推送、任务队列持久化到 SQLite，再换框架也不迟——路由层只有 200 行。
+
+## 3. 为什么产物统一进 `out/`，而不是让模型自己找地方
+
+早期版本只在提示词里加一句「把文件放到 out/xxx」，实测 **Codex 会把文件写回原工作区**：
+模型的默认假设是「当前目录就是项目目录」，一句提示词的权重低于它看到的工作区上下文。
+
+改成 **子进程 `cwd` 直接指向交付目录** + 提示词说明「参考文件用绝对路径去读原工作区」之后，
+同一个任务立刻稳定落盘（实测文件写到了 `out/<目录>`）。
+
+所以 `resolve_outdir()` 做三件事：清洗非法字符、**强制 resolve 在 `OUT_ROOT` 内**、`mkdir` 好再交给子进程。
+目录名本身是用户输入，必须当成不可信输入处理。
+
+## 4. 为什么 Kimi 走 WebBridge，而不是模拟点击
+
+模拟点击（pyautogui 一类）在 Electron 应用上极其脆弱：窗口位置、DPI、焦点、更新都会让它失效。
+
+Kimi 官方提供了 WebBridge：本地 `POST /command`，语义是「navigate / snapshot / click / screenshot」，
+extension 在浏览器侧执行。这条路是官方支持的，失败时也有明确的错误码。
+
+没有 extension 时它返回 `{"ok":false,"error":{"code":"tool_error","message":"no extension connected"}}`，
+所以 Workers 侧把「守护进程没起」和「扩展没连」分开报告，而不是把 502 直接抛给用户。
+
+## 5. 为什么 WorkBuddy 是半自动
+
+它有 Electron 桌面端、有本地数据目录，但没有可编程的任务入口（没有 CLI、没有 HTTP API）。
+与其假装能自动化，不如老实做「复制提示词 + 唤起应用」，并在 UI 上标注 ⚠️。
+
+这也是这个项目的原则：**能力边界写在界面上**，而不是等用户点了才发现不行。
+
+## 6. 解码：为什么不用 `text=True`
+
+`subprocess.run(text=True)` 用控制台区域编码（中文 Windows 是 cp936）解码。
+`kimi-webbridge status` 返回的 JSON 里有个 UTF-8 破折号 `—`（字节 `0x94`），
+在 cp936 下是非法序列，读取线程直接抛 `UnicodeDecodeError`，`stdout` 变成 `None` ——
+表现为「守护进程明明在跑，探测却说没跑」。
+
+所以 `run_hidden()` 一律拿 bytes，自己按 UTF-8 → GBK 顺序尝试解码，最后兜底 `errors="replace"`。
+这是本项目唯一一个「看起来多余、删掉就复发」的防御。
+
+## 7. 单实例守卫
+
+改完代码重启，如果旧进程还占着端口，新进程会绑定失败并退出，浏览器打开的还是旧代码。
+这个坑很隐蔽（页面能开、接口能通，就是行为没变）。
+
+所以 `main()` 先请求 `/api/ping`：拿到同名服务就打印 PID 并退出，而不是静默失败。
+`scripts/restart.ps1` 也按这个思路先杀旧再起新。
+
+## 8. 安全边界
+
+- 默认绑 `127.0.0.1`。非回环地址 + 无 token = 拒绝启动，这条在 `serve()` 里硬拦。
+- `/artifact` 只服务 `OUT_ROOT` 内的文件，`resolve()` 之后用 `relative_to()` 校验。
+- token 走 header 或 query；首页与 `/healthz` 永远公开，方便探活和排查「到底起没起」。
+- 不落盘任何凭据；DSH 的 key 从 `~/.dsh/.credentials.yaml` 读到内存后只进子进程 env。
+
+## 9. 测试策略
+
+- `test_config`：默认值与模板结构，防止 UI 拉到不存在的 target。
+- `test_jobs`：任务生命周期、落盘时过滤私有字段、`resolve_outdir` 的越界防护。
+- `test_server`：真起一个随机端口的服务器，测路由、五张卡结构、404/403/401。
+  `target_state` 在测试里打桩，因为真实探测会起子进程（慢，且在 CI 上没有那些应用）。
+- `test_procs`：端口探测用真实 socket，跨平台无外部依赖。

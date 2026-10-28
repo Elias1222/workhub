@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "workhub"
+description = "One local console for Codex, WorkBuddy, DSH, Kimi and Muse — dispatch one task to many agents, collect the artifacts."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "WorkHub contributors" }]
+keywords = ["agents", "codex", "kimi", "muse", "dashboard", "local-first", "automation"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Web Environment",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: User Interfaces",
+  "Typing :: Typed",
+]
+dependencies = []
+dynamic = ["version"]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.5", "pytest>=8"]
+
+[project.scripts]
+workhub = "workhub.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Elias1222/workhub"
+Issues = "https://github.com/Elias1222/workhub/issues"
+Changelog = "https://github.com/Elias1222/workhub/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["workhub*"]
+
+[tool.setuptools.package-data]
+workhub = ["web/*.html", "py.typed"]
+
+[tool.setuptools.dynamic]
+version = { attr = "workhub.__version__" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

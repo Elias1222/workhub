@@ -1,0 +1,38 @@
+{
+  "port": 8770,
+  "host": "127.0.0.1",
+
+  "codex": {
+    "cli": "C:/Users/you/.node/node-v22.14.0-win-x64/codex.cmd",
+    "node_dir": "C:/Users/you/.node/node-v22.14.0-win-x64",
+    "exe_glob": "C:/Users/you/AppData/Local/OpenAI/Codex/bin/*/codex.exe",
+    "cwd": "C:/work/scratch"
+  },
+
+  "workbuddy": {
+    "exe": "C:/Users/you/AppData/Local/Programs/WorkBuddy/WorkBuddy.exe"
+  },
+
+  "kimi": {
+    "exe": "C:/Users/you/AppData/Local/Programs/Kimi/Kimi.exe",
+    "bridge": "C:/Users/you/.kimi-webbridge/bin/kimi-webbridge.exe",
+    "web": "http://127.0.0.1:10086"
+  },
+
+  "muse": {
+    "dir": "C:/work/muse",
+    "port": 8765,
+    "python": "C:/Users/you/AppData/Local/Programs/Python/Python312/pythonw.exe"
+  },
+
+  "dsh": {
+    "cli": "C:/Users/you/AppData/Local/Programs/DeepSeek Harness/resources/runtime/cli/bin/dsh.cmd",
+    "exe": "C:/Users/you/AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe",
+    "creds": "C:/Users/you/.dsh/.credentials.yaml",
+    "gui": "http://127.0.0.1:49870"
+  },
+
+  "out": {
+    "root": "C:/Users/you/WorkHub/out"
+  }
+}
